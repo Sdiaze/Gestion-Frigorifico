@@ -8,6 +8,7 @@ from conexion_bd import (
     liberar_ubicacion,
     obtener_opciones_disponibles,
     obtener_todas_las_posiciones,
+    ingresar_pallet
 )
 
 # --- Inicialización de la Aplicación ---
@@ -15,13 +16,14 @@ app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callb
 
 # --- Layouts ---
 def sidebar():
-    """Barra lateral con enlaces de navegación."""
     return dbc.Col(
         dbc.Nav(
             [
+                dbc.NavLink("Ingresar Pallet", href="/ingresar_pallet", active="exact"),
                 dbc.NavLink("Gestión", href="/gestion", active="exact"),
                 dbc.NavLink("Liberar Ubicación", href="/liberar", active="exact"),
                 dbc.NavLink("Visualización", href="/visualizacion", active="exact"),
+                dbc.NavLink("Visualización en Tiempo Real", href="/visualizacion_realtime", active="exact"),
                 dbc.NavLink("Cerrar Sesión", href="/", active="exact"),
             ],
             vertical=True,
@@ -34,6 +36,8 @@ def sidebar():
             "height": "100vh",
         },
     )
+
+
 
 
 
@@ -154,44 +158,33 @@ def liberar_layout():
 
 def visualizacion_layout():
     """Layout para la página de visualización del almacén."""
-    posiciones = obtener_todas_las_posiciones()
-
-    try:
-        df_posiciones = pd.DataFrame.from_records(posiciones, columns=[
-            "Tipo Almacén", "Piso", "Rack", "Letra", "Posición Pallet", "Estado Ubicación", 
-            "id_pallet_asignado", "Descripción", "Fecha Ingreso"
-        ])
-    except ValueError as e:
-        return html.Div([dbc.Alert(f"Error al crear DataFrame: {e}", color="danger")])
-
-    # Reemplaza valores nulos con "Libre"
-    df_posiciones["id_pallet_asignado"] = df_posiciones["id_pallet_asignado"].fillna("Libre")
-
-    # Dropdowns para filtrar
+    
+    # Los dropdowns ya no tienen una lista fija de opciones. Las opciones se cargarán dinámicamente desde el callback.
     filtro_dropdown = dcc.Dropdown(
         id="filtro-id-pallet",
-        options=[
-            {"label": val, "value": val} for val in df_posiciones["id_pallet_asignado"].unique() if val != "Libre"
-        ],
+        options=[],
         placeholder="Seleccione uno o más ID de Pallet",
         multi=True,
         style={"marginBottom": "20px"}
     )
-    filtro_descripcion_dropdown = dcc.Dropdown(
-        id="filtro-descripcion-pallet",
-        options=[
-            {"label": val, "value": val} for val in df_posiciones["Descripción"].dropna().unique()
-        ],
-        placeholder="Seleccione una o más Descripciones",
+    filtro_variedad_dropdown = dcc.Dropdown(
+        id="filtro-variedad-pallet",
+        options=[],
+        placeholder="Seleccione una o más Variedades",
+        multi=True,
+        style={"marginBottom": "20px"}
+    )
+    filtro_mercado_dropdown = dcc.Dropdown(
+        id="filtro-mercado-pallet",
+        options=[],
+        placeholder="Seleccione uno o más Mercados",
         multi=True,
         style={"marginBottom": "20px"}
     )
     filtro_fecha_dropdown = dcc.Dropdown(
-        id="filtro-fecha-ingreso",
-        options=[
-            {"label": str(val), "value": str(val)} for val in df_posiciones["Fecha Ingreso"].dropna().unique()
-        ],
-        placeholder="Seleccione una o más Fechas",
+        id="filtro-fecha-faena",
+        options=[],
+        placeholder="Seleccione una o más Fechas de Faena",
         multi=True,
         style={"marginBottom": "20px"}
     )
@@ -217,9 +210,11 @@ def visualizacion_layout():
         # Filtros
         html.H5("Filtrar por ID de Pallet", style={"marginTop": "20px"}),
         filtro_dropdown,
-        html.H5("Filtrar por Descripción", style={"marginTop": "20px"}),
-        filtro_descripcion_dropdown,
-        html.H5("Filtrar por Fecha de Ingreso", style={"marginTop": "20px"}),
+        html.H5("Filtrar por Variedad", style={"marginTop": "20px"}),
+        filtro_variedad_dropdown,
+        html.H5("Filtrar por Mercado", style={"marginTop": "20px"}),
+        filtro_mercado_dropdown,
+        html.H5("Filtrar por Fecha de Faena", style={"marginTop": "20px"}),
         filtro_fecha_dropdown,
         html.Hr(),
     ], style={
@@ -234,7 +229,7 @@ def visualizacion_layout():
             # Barra lateral
             dbc.Col(
                 sidebar(),
-                xs=12, sm=12, md=3, lg=2, xl=2,  # Barra lateral ocupa 2 columnas en pantallas grandes
+                xs=12, sm=12, md=3, lg=2, xl=2,
                 style={"backgroundColor": "#f8f9fa", "padding": "20px", "minHeight": "100vh"}
             ),
             # Contenido principal
@@ -247,12 +242,12 @@ def visualizacion_layout():
                         html.Div([
                             html.Div([
                                 html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
-                                html.H2(id="utilizacion-rack1-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),  # ID para callback
+                                html.H2(id="utilizacion-rack1-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
                                 html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
-                                html.H2(id="disponibles-rack1-html", className="text-success", style={"display": "inline-block"}),  # ID para callback
-                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),  # Flexbox para alineación horizontal
+                                html.H2(id="disponibles-rack1-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
                         ]),
-                        html.Div(id="rack1-html"),  # Tabla de Rack 1
+                        html.Div(id="rack1-html"),
                     ], style={"marginBottom": "50px"}),
 
                     # Rack 2
@@ -260,23 +255,245 @@ def visualizacion_layout():
                         html.Div([
                             html.Div([
                                 html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
-                                html.H2(id="utilizacion-rack2-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),  # ID para callback
+                                html.H2(id="utilizacion-rack2-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
                                 html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
-                                html.H2(id="disponibles-rack2-html", className="text-success", style={"display": "inline-block"}),  # ID para callback
-                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),  # Flexbox para alineación horizontal
+                                html.H2(id="disponibles-rack2-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
                         ]),
-                        html.Div(id="rack2-html"),  # Tabla de Rack 2
+                        html.Div(id="rack2-html"),
                     ]),
                 ]),
-                xs=12, sm=12, md=7, lg=8, xl=8,  # Ajusta el tamaño del contenido principal
+                xs=12, sm=12, md=7, lg=8, xl=8,
             ),
             # Columna derecha con métricas generales y filtros
             dbc.Col(
                 columna_derecha,
-                xs=12, sm=12, md=3, lg=2, xl=2,  # Columna derecha ocupa 2 columnas en pantallas grandes
+                xs=12, sm=12, md=3, lg=2, xl=2,
             ),
         ], className="g-0"),
     ])
+
+def ingresar_pallet_layout():
+    """Layout para la página de ingreso de pallets usando el código QR."""
+    return html.Div([
+        dbc.Row([
+            sidebar(),
+            dbc.Col(
+                dbc.Container([
+                    html.H2("Ingresar Pallet desde Código QR", className="mb-4"),
+                    dbc.Input(id="qr-data-input", placeholder="Escanee o ingrese el código QR", type="text", className="mb-3"),
+                    dbc.Button("Ingresar Pallet", id="ingresar-pallet-button", color="primary", className="mb-4"),
+                    html.Div(id="ingresar-pallet-feedback", className="mt-2")
+                ]),
+                width=10,
+            ),
+        ]),
+    ])
+
+
+def visualizacion_realtime_layout():
+    """Layout para la página de visualización en tiempo real del almacén."""
+    return html.Div([
+        dbc.Row([
+            sidebar(),
+            dbc.Col(
+                dbc.Container([
+                    html.H2("Visualización en Tiempo Real del Almacén", style={"marginBottom": "30px"}),
+
+                    # Intervalo para actualizaciones en tiempo real
+                    dcc.Interval(
+                        id="interval-realtime",
+                        interval=5000,  # Actualiza cada 5000ms (5 segundos)
+                        n_intervals=0
+                    ),
+
+                    # Rack 1
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="utilizacion-rack1-realtime-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
+                                html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="disponibles-rack1-realtime-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
+                        ]),
+                        html.Div(id="rack1-realtime-html"),
+                    ], style={"marginBottom": "50px"}),
+
+                    # Rack 2
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="utilizacion-rack2-realtime-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
+                                html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="disponibles-rack2-realtime-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
+                        ]),
+                        html.Div(id="rack2-realtime-html"),
+                    ]),
+                ]),
+                xs=12, sm=12, md=10, lg=10, xl=10,
+            ),
+        ]),
+    ])
+
+
+def visualizacion_realtime_layout():
+    """Layout para la página de visualización en tiempo real del almacén."""
+    return html.Div([
+        dbc.Row([
+            sidebar(),
+            dbc.Col(
+                dbc.Container([
+                    html.H2("Visualización en Tiempo Real del Almacén", style={"marginBottom": "30px"}),
+
+                    # Intervalo para actualizaciones en tiempo real
+                    dcc.Interval(
+                        id="interval-realtime",
+                        interval=2000,  # Actualiza cada 2000ms (2 segundos)
+                        n_intervals=0
+                    ),
+
+                    # Rack 1
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="utilizacion-rack1-realtime-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
+                                html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="disponibles-rack1-realtime-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
+                        ]),
+                        html.Div(id="rack1-realtime-html"),
+                    ], style={"marginBottom": "50px"}),
+
+                    # Rack 2
+                    html.Div([
+                        html.Div([
+                            html.Div([
+                                html.H4("Utilización:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="utilizacion-rack2-realtime-html", className="text-success", style={"marginRight": "30px", "display": "inline-block"}),
+                                html.H4("Espacios disponibles:", className="text-primary", style={"marginRight": "10px", "display": "inline-block"}),
+                                html.H2(id="disponibles-rack2-realtime-html", className="text-success", style={"display": "inline-block"}),
+                            ], style={"display": "flex", "alignItems": "center", "marginBottom": "15px"}),
+                        ]),
+                        html.Div(id="rack2-realtime-html"),
+                    ]),
+                ]),
+                xs=12, sm=12, md=10, lg=10, xl=10,
+            ),
+        ]),
+    ])
+
+
+@app.callback(
+    [
+        Output("rack1-realtime-html", "children"),
+        Output("rack2-realtime-html", "children"),
+        Output("utilizacion-rack1-realtime-html", "children"),
+        Output("utilizacion-rack2-realtime-html", "children"),
+        Output("disponibles-rack1-realtime-html", "children"),
+        Output("disponibles-rack2-realtime-html", "children"),
+    ],
+    Input("interval-realtime", "n_intervals")
+)
+def actualizar_vista_realtime(n_intervals):
+    """Actualiza los datos en tiempo real."""
+
+    # Definición de generar_html_matriz
+    def generar_html_matriz(df, titulo):
+        """Genera el HTML para la tabla dinámica de un rack."""
+        filas = []
+        encabezados = ["Piso", "Posición Pallet"] + list(df.columns)
+        filas.append(html.Tr([html.Th(col, style={"textAlign": "center"}) for col in encabezados]))
+
+        for index, row in df.iterrows():
+            celdas = []
+            if isinstance(index, tuple):
+                piso, posicion = index
+            else:
+                piso = index
+                posicion = ""
+            celdas.append(html.Td(piso, style={"textAlign": "center"}))
+            celdas.append(html.Td(posicion, style={"textAlign": "center"}))
+
+            for col, val in row.items():
+                estilo = {"textAlign": "center", "fontWeight": "bold", "color": "white"}
+                if val == "Libre":
+                    estilo["backgroundColor"] = "green"
+                else:
+                    estilo["backgroundColor"] = "red"
+                celdas.append(html.Td(val, style=estilo))
+
+            filas.append(html.Tr(celdas))
+
+        return html.Div([
+            html.H4(titulo, style={"marginTop": "20px", "marginBottom": "10px"}),
+            html.Table(filas, className="table table-bordered table-hover", style={"marginTop": "20px"})
+        ])
+
+    # Recuperar posiciones
+    posiciones = obtener_todas_las_posiciones()
+    if not posiciones:
+        return "Error: No hay datos disponibles", "", "", "", "", ""
+
+    df_posiciones = pd.DataFrame.from_records(posiciones, columns=[
+        "Tipo Almacén", "Piso", "Rack", "Letra", "Posición Pallet", "Estado Ubicación",
+        "id_pallet_asignado", "Descripción", "Variedad", "Mercado", "Fecha Faena", "NPallet"
+    ])
+    df_posiciones["id_pallet_asignado"] = df_posiciones["id_pallet_asignado"].fillna("Libre")
+
+    # Filtrar racks
+    df_rack1 = df_posiciones[df_posiciones["Rack"] == 1]
+    df_rack2 = df_posiciones[df_posiciones["Rack"] == 2]
+
+    # Calcular métricas
+    total_rack1 = len(df_rack1)
+    total_rack2 = len(df_rack2)
+    ocupados_rack1 = len(df_rack1[df_rack1["id_pallet_asignado"] != "Libre"])
+    ocupados_rack2 = len(df_rack2[df_rack2["id_pallet_asignado"] != "Libre"])
+    disponibles_rack1 = total_rack1 - ocupados_rack1
+    disponibles_rack2 = total_rack2 - ocupados_rack2
+    utilizacion_rack1 = f"{(ocupados_rack1 / total_rack1 * 100):.2f}%" if total_rack1 > 0 else "0.00%"
+    utilizacion_rack2 = f"{(ocupados_rack2 / total_rack2 * 100):.2f}%" if total_rack2 > 0 else "0.00%"
+
+    # Crear tablas dinámicas
+    matriz_rack1 = pd.crosstab(
+        index=[df_rack1["Piso"], df_rack1["Posición Pallet"]],
+        columns=df_rack1["Letra"],
+        values=df_rack1["id_pallet_asignado"],
+        aggfunc="first"
+    ).fillna("Libre").sort_index(ascending=[False, False])
+
+    matriz_rack2 = pd.crosstab(
+        index=[df_rack2["Piso"], df_rack2["Posición Pallet"]],
+        columns=df_rack2["Letra"],
+        values=df_rack2["id_pallet_asignado"],
+        aggfunc="first"
+    ).fillna("Libre").sort_index(ascending=[False, False])
+
+    rack1_html = generar_html_matriz(matriz_rack1, "Rack 1")
+    rack2_html = generar_html_matriz(matriz_rack2, "Rack 2")
+
+    return rack1_html, rack2_html, utilizacion_rack1, utilizacion_rack2, f"{disponibles_rack1} espacios", f"{disponibles_rack2} espacios"
+
+
+@app.callback(
+    [Output("ingresar-pallet-feedback", "children"),
+     Output("qr-data-input", "value")],
+    [Input("ingresar-pallet-button", "n_clicks")],
+    [State("qr-data-input", "value")],
+    prevent_initial_call=True
+)
+def manejar_ingresar_pallet(n_clicks, qr_data):
+    """Maneja el ingreso del pallet a la base de datos."""
+    if qr_data:
+        feedback = ingresar_pallet(qr_data)
+    else:
+        feedback = ""
+    return feedback, ""
+
 
 
 
@@ -287,18 +504,23 @@ def visualizacion_layout():
      Output("utilizacion-rack2-html", "children"),
      Output("disponibles-rack1-html", "children"),
      Output("disponibles-rack2-html", "children"),
-     Output("utilizacion-general-html", "children"),  # Nueva salida
-     Output("espacios-disponibles-general-html", "children")],  # Nueva salida
+     Output("utilizacion-general-html", "children"),
+     Output("espacios-disponibles-general-html", "children"),
+     Output("filtro-id-pallet", "options"),
+     Output("filtro-variedad-pallet", "options"),
+     Output("filtro-mercado-pallet", "options"),
+     Output("filtro-fecha-faena", "options")],
     [Input("filtro-id-pallet", "value"),
-     Input("filtro-descripcion-pallet", "value"),
-     Input("filtro-fecha-ingreso", "value")]
+     Input("filtro-variedad-pallet", "value"),
+     Input("filtro-mercado-pallet", "value"),
+     Input("filtro-fecha-faena", "value")]
 )
-def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
-    """Actualiza las tablas, la utilización, los espacios disponibles y las métricas generales."""
+def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha_faena):
+    """Actualiza las tablas, la utilización, los espacios disponibles, las métricas generales y los filtros."""
     posiciones = obtener_todas_las_posiciones()
     df_posiciones = pd.DataFrame.from_records(posiciones, columns=[
         "Tipo Almacén", "Piso", "Rack", "Letra", "Posición Pallet", "Estado Ubicación",
-        "id_pallet_asignado", "Descripción", "Fecha Ingreso"
+        "id_pallet_asignado", "Descripción", "Variedad", "Mercado", "Fecha Faena", "NPallet"
     ])
     df_posiciones["id_pallet_asignado"] = df_posiciones["id_pallet_asignado"].fillna("Libre")
 
@@ -317,12 +539,12 @@ def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
     utilizacion_rack2 = f"{(ocupados_rack2 / total_rack2 * 100):.2f}%" if total_rack2 > 0 else "0.00%"
 
     # Calcular métricas generales
-    total_general = total_rack1 + total_rack2
+    total_general = total_rack1 + total_rack2  # Se define total_general aquí
     ocupados_general = ocupados_rack1 + ocupados_rack2
     disponibles_general = total_general - ocupados_general
     utilizacion_general = f"{(ocupados_general / total_general * 100):.2f}%" if total_general > 0 else "0.00%"
 
-    # Crear matrices dinámicas
+    # Crear matrices dinámicas para Rack 1 y Rack 2
     matriz_rack1 = pd.crosstab(
         index=[df_rack1["Piso"], df_rack1["Posición Pallet"]],
         columns=df_rack1["Letra"],
@@ -337,9 +559,14 @@ def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
         aggfunc="first"
     ).fillna("Libre").sort_index(ascending=[False, False])
 
-    # Función para generar HTML con lógica de color
-    def generar_html_matriz(df, titulo, id_filtro, descripcion_filtro, fecha_filtro):
-        """Genera una tabla HTML con colores dinámicos basados en los filtros."""
+    # Crear opciones para los dropdowns dinámicos
+    id_pallet_options = [{"label": val, "value": val} for val in df_posiciones["id_pallet_asignado"].unique() if val != "Libre"]
+    variedad_options = [{"label": val, "value": val} for val in df_posiciones["Variedad"].dropna().unique() if val != "Libre"]
+    mercado_options = [{"label": val, "value": val} for val in df_posiciones["Mercado"].dropna().unique() if val != "Libre"]
+    fecha_faena_options = [{"label": str(val), "value": str(val)} for val in df_posiciones["Fecha Faena"].dropna().unique() if val != "Libre"]
+
+    # Generar HTML de tablas con colores dinámicos
+    def generar_html_matriz(df, titulo):
         filas = []
         encabezados = ["Piso", "Posición Pallet"] + list(df.columns)
         filas.append(html.Tr([html.Th(col, style={"textAlign": "center"}) for col in encabezados]))
@@ -356,13 +583,15 @@ def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
                 if val == "Libre":
                     estilo["backgroundColor"] = "green"
                 else:
-                    descripcion = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Descripción"].values[0]
-                    fecha = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Fecha Ingreso"].values[0]
+                    variedad = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Variedad"].values[0]
+                    mercado = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Mercado"].values[0]
+                    fecha_faena = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Fecha Faena"].values[0]
 
                     if (
                         (filtro_ids and val in filtro_ids) or
-                        (filtro_descripcion and descripcion in filtro_descripcion) or
-                        (filtro_fechas and str(fecha) in filtro_fechas)
+                        (filtro_variedad and variedad in filtro_variedad) or
+                        (filtro_mercado and mercado in filtro_mercado) or
+                        (filtro_fecha_faena and str(fecha_faena) in filtro_fecha_faena)
                     ):
                         estilo["backgroundColor"] = "blue"
                     else:
@@ -376,8 +605,8 @@ def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
             html.Table(filas, className="table table-bordered table-hover", style={"marginTop": "20px"})
         ])
 
-    rack1_html = generar_html_matriz(matriz_rack1, "Rack 1", filtro_ids, filtro_descripcion, filtro_fechas)
-    rack2_html = generar_html_matriz(matriz_rack2, "Rack 2", filtro_ids, filtro_descripcion, filtro_fechas)
+    rack1_html = generar_html_matriz(matriz_rack1, "Rack 1")
+    rack2_html = generar_html_matriz(matriz_rack2, "Rack 2")
 
     return (
         rack1_html,
@@ -386,29 +615,34 @@ def actualizar_colores(filtro_ids, filtro_descripcion, filtro_fechas):
         utilizacion_rack2,
         f"{disponibles_rack1} espacios",
         f"{disponibles_rack2} espacios",
-        utilizacion_general,  # Métrica general
-        f"{disponibles_general} espacios"  # Métrica general
+        utilizacion_general,
+        f"{disponibles_general} espacios",
+        id_pallet_options,
+        variedad_options,
+        mercado_options,
+        fecha_faena_options
     )
-
-
-
-
-
 
 
 # --- Callbacks ---
 @app.callback(
     Output("page-content", "children"),
-    Input("url", "pathname")  # Cambia el contenido según la ruta
+    Input("url", "pathname")
 )
 def display_page(pathname):
-    if pathname == "/gestion":
-        return gestion_layout()  # Página de gestión
+    if pathname == "/ingresar_pallet":
+        return ingresar_pallet_layout()
+    elif pathname == "/gestion":
+        return gestion_layout()
     elif pathname == "/liberar":
-        return liberar_layout()  # Página de liberar ubicación
+        return liberar_layout()
     elif pathname == "/visualizacion":
-        return visualizacion_layout()  # Página de visualización
-    return login_layout()  # Página de inicio de sesión
+        return visualizacion_layout()
+    elif pathname == "/visualizacion_realtime":
+        return visualizacion_realtime_layout()
+    return login_layout()
+
+
 
 
 @app.callback(

@@ -2,6 +2,7 @@
 
 import pyodbc
 import hashlib
+import dash_bootstrap_components as dbc
 
 
 # Función para conectar a la base de datos
@@ -163,7 +164,7 @@ def liberar_ubicacion(pallet_id):
 
 def obtener_todas_las_posiciones():
     """
-    Recupera todas las posiciones del almacén, incluyendo id_pallet_asignado, descripción y fecha de ingreso.
+    Recupera todas las posiciones del almacén, incluyendo id_pallet_asignado, descripción, variedad, mercado, fecha de faena y NPallet.
     """
     conn = conectar_bd()
     cursor = conn.cursor()
@@ -179,13 +180,17 @@ def obtener_todas_las_posiciones():
                 u.status_ubicacion, 
                 u.id_pallet_asignado,
                 p.descripcion,
-                p.fecha_ingreso
+                p.Variedad,
+                p.Mercado,
+                p.fechafaena,
+                p.NPallet
             FROM ubicaciones u
             LEFT JOIN pallets p ON u.id_pallet_asignado = p.id_pallet
         """)
         return cursor.fetchall()
     finally:
         conn.close()
+
 
 
 
@@ -260,6 +265,59 @@ def obtener_opciones_disponibles(tipo_almacen=None, piso=None, rack=None, letra=
         return tipos_almacen, pisos, racks, letras
     finally:
         conn.close()
+
+
+def ingresar_pallet(qr_data):
+    """
+    Inserta un pallet en la base de datos utilizando el procedimiento almacenado InsertPalletFromQR.
+
+    Args:
+        qr_data (str): Los datos del código QR que se deben insertar en la base de datos.
+
+    Returns:
+        str: Un mensaje indicando si el ingreso fue exitoso o si hubo un error.
+    """
+    if qr_data:
+        # Dividir los datos del QR
+        datos = qr_data.split(',')
+        
+        if len(datos) != 5:
+            return dbc.Alert(f"Error: El formato del QR no es válido. Debe tener 5 campos separados por comas.", color="danger")
+        
+        # Extraer cada campo
+        variedad = datos[0]
+        descripcion = datos[1]
+        mercado = datos[2]
+        fecha_faena = datos[3]
+        n_pallet = datos[4]
+        
+        # Verificar la longitud de FechaFaena
+        if len(fecha_faena) != 8 or not fecha_faena.isdigit():
+            return dbc.Alert(f"Error: La Fecha Faena debe tener exactamente 8 caracteres numéricos. Valor proporcionado: {fecha_faena}", color="danger")
+
+        # Verificar la longitud de NPallet
+        if len(n_pallet) != 8:
+            return dbc.Alert(f"Error: El NPallet debe tener exactamente 8 caracteres. Valor proporcionado: {n_pallet}", color="danger")
+        
+        conn = conectar_bd()
+        cursor = conn.cursor()
+        try:
+            # Verificar si el NPallet ya existe
+            cursor.execute("SELECT COUNT(*) FROM pallets WHERE NPallet = ?", (n_pallet,))
+            if cursor.fetchone()[0] > 0:
+                return dbc.Alert(f"Error: El NPallet '{n_pallet}' ya existe en la base de datos.", color="danger")
+            
+            # Ejecutar el procedimiento almacenado para insertar el pallet desde el QR
+            cursor.execute("EXEC InsertPalletFromQR @qrData = ?", (qr_data,))
+            conn.commit()
+            return dbc.Alert(f"Pallet ingresado exitosamente con datos: {qr_data}", color="success")
+        except pyodbc.Error as e:
+            return dbc.Alert(f"Error al ingresar pallet: {e}", color="danger")
+        finally:
+            conn.close()
+    return ""
+
+
 
 # Función para cerrar la conexión a la base de datos
 def cerrar_conexion_bd(conn):
