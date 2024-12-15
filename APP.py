@@ -905,6 +905,11 @@ def handle_create_user(n_clicks, username, password):
     return no_update, no_update, ""
 
 
+@app.server.route("/health")
+def health_check():
+    return "OK", 200
+
+
 
 
 
