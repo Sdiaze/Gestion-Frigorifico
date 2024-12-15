@@ -8,18 +8,22 @@ import dash_bootstrap_components as dbc
 # Función para conectar a la base de datos
 def conectar_bd():
     """
-    Establece una conexión con la base de datos.
+    Establece una conexión con la base de datos en Azure.
     """
     try:
         conn = pyodbc.connect(
             'DRIVER={ODBC Driver 17 for SQL Server};'
-            'SERVER=DESKTOP-C1J5V6J;'
-            'DATABASE=Prueba1;'
-            'Trusted_Connection=yes;'
+            'SERVER=gestiondepallet-server.database.windows.net;'
+            'DATABASE=GestionFrigorifico;'
+            'UID=Admin_DBA;'
+            'PWD=Sebyta14;'
+            'Encrypt=yes;'
+            'TrustServerCertificate=no;'
         )
         return conn
     except pyodbc.Error as e:
         raise ConnectionError(f"Error al conectar a la base de datos: {e}")
+
 
 
 def crear_usuario(username, password):
@@ -221,7 +225,7 @@ def obtener_opciones_campo():
 
 def obtener_opciones_disponibles(tipo_almacen=None, piso=None, rack=None, letra=None):
     """
-    Recupera las opciones disponibles basadas en filtros de ubicación.
+    Recupera las opciones disponibles basadas en los filtros seleccionados.
     """
     conn = conectar_bd()
     cursor = conn.cursor()
@@ -265,6 +269,7 @@ def obtener_opciones_disponibles(tipo_almacen=None, piso=None, rack=None, letra=
         return tipos_almacen, pisos, racks, letras
     finally:
         conn.close()
+
 
 
 def ingresar_pallet(qr_data):
@@ -323,7 +328,7 @@ def ingresar_pallet(qr_data):
 def cerrar_conexion_bd(conn):
     """
     Cierra una conexión a la base de datos.
-    Si `conn` es None, no realiza ninguna acción.
+    Si conn es None, no realiza ninguna acción.
     """
     try:
         if conn is not None:
@@ -331,5 +336,3 @@ def cerrar_conexion_bd(conn):
             print("Conexión a la base de datos cerrada correctamente.")
     except Exception as e:
         print(f"Error al cerrar la conexión a la base de datos: {e}")
-
-

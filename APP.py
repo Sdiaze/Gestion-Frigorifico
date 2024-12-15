@@ -1,6 +1,7 @@
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_bootstrap_components as dbc
 import pandas as pd
+import pyodbc
 from conexion_bd import (
     crear_usuario,
     verificar_credenciales,
@@ -8,7 +9,8 @@ from conexion_bd import (
     liberar_ubicacion,
     obtener_opciones_disponibles,
     obtener_todas_las_posiciones,
-    ingresar_pallet
+    ingresar_pallet,
+    conectar_bd    
 )
 
 # --- Inicialización de la Aplicación ---
@@ -123,7 +125,8 @@ def gestion_layout():
                             dcc.Dropdown(id="piso-select", placeholder="Seleccione Piso", options=[]),
                             dcc.Dropdown(id="rack-select", placeholder="Seleccione Rack", options=[]),
                             dcc.Dropdown(id="letra-select", placeholder="Seleccione Letra", options=[]),
-                            dbc.Input(id="pallet-id", placeholder="ID del Pallet", type="text", className="mt-2"),
+                            # Cambiamos el placeholder para reflejar que se ingresará NPallet
+                            dbc.Input(id="pallet-id", placeholder="Ingrese el NPallet", type="text", className="mt-2"),
                             dbc.Button("Asignar Ubicación", id="assign-button", className="mt-3", color="success"),
                             html.Div(id="assign-feedback", className="mt-3"),
                         ], width=6),
@@ -133,6 +136,7 @@ def gestion_layout():
             ),
         ]),
     ])
+
 
 def liberar_layout():
     """Layout para la página de liberación de ubicaciones."""
@@ -144,7 +148,8 @@ def liberar_layout():
                     html.H2("Liberar Ubicación de Pallet"),
                     dbc.Row([
                         dbc.Col([
-                            dbc.Input(id="pallet-id-liberar", placeholder="ID del Pallet para liberar", type="text", className="mb-2"),
+                            # Cambiamos el placeholder para reflejar que se espera un string completo
+                            dbc.Input(id="pallet-id-liberar", placeholder="Ingrese los datos del pallet ", type="text", className="mb-2"),
                             dbc.Button("Liberar Ubicación", id="liberar-button", color="danger", className="mt-3"),
                             html.Div(id="liberar-feedback", className="mt-3"),
                         ], width=6),
@@ -156,14 +161,15 @@ def liberar_layout():
     ])
 
 
+
 def visualizacion_layout():
     """Layout para la página de visualización del almacén."""
     
-    # Los dropdowns ya no tienen una lista fija de opciones. Las opciones se cargarán dinámicamente desde el callback.
+    # Los dropdowns ahora hacen referencia a NPallet en lugar de ID de Pallet
     filtro_dropdown = dcc.Dropdown(
         id="filtro-id-pallet",
         options=[],
-        placeholder="Seleccione uno o más ID de Pallet",
+        placeholder="Seleccione uno o más NPallet",
         multi=True,
         style={"marginBottom": "20px"}
     )
@@ -208,7 +214,7 @@ def visualizacion_layout():
         html.Hr(),
 
         # Filtros
-        html.H5("Filtrar por ID de Pallet", style={"marginTop": "20px"}),
+        html.H5("Filtrar por NPallet", style={"marginTop": "20px"}),
         filtro_dropdown,
         html.H5("Filtrar por Variedad", style={"marginTop": "20px"}),
         filtro_variedad_dropdown,
@@ -272,6 +278,7 @@ def visualizacion_layout():
             ),
         ], className="g-0"),
     ])
+
 
 def ingresar_pallet_layout():
     """Layout para la página de ingreso de pallets usando el código QR."""
@@ -401,7 +408,7 @@ def visualizacion_realtime_layout():
 def actualizar_vista_realtime(n_intervals):
     """Actualiza los datos en tiempo real."""
 
-    # Definición de generar_html_matriz
+    # Generar HTML de tablas dinámicas
     def generar_html_matriz(df, titulo):
         """Genera el HTML para la tabla dinámica de un rack."""
         filas = []
@@ -410,11 +417,7 @@ def actualizar_vista_realtime(n_intervals):
 
         for index, row in df.iterrows():
             celdas = []
-            if isinstance(index, tuple):
-                piso, posicion = index
-            else:
-                piso = index
-                posicion = ""
+            piso, posicion = index if isinstance(index, tuple) else (index, "")
             celdas.append(html.Td(piso, style={"textAlign": "center"}))
             celdas.append(html.Td(posicion, style={"textAlign": "center"}))
 
@@ -442,7 +445,7 @@ def actualizar_vista_realtime(n_intervals):
         "Tipo Almacén", "Piso", "Rack", "Letra", "Posición Pallet", "Estado Ubicación",
         "id_pallet_asignado", "Descripción", "Variedad", "Mercado", "Fecha Faena", "NPallet"
     ])
-    df_posiciones["id_pallet_asignado"] = df_posiciones["id_pallet_asignado"].fillna("Libre")
+    df_posiciones["NPallet"] = df_posiciones["NPallet"].fillna("Libre")
 
     # Filtrar racks
     df_rack1 = df_posiciones[df_posiciones["Rack"] == 1]
@@ -451,8 +454,8 @@ def actualizar_vista_realtime(n_intervals):
     # Calcular métricas
     total_rack1 = len(df_rack1)
     total_rack2 = len(df_rack2)
-    ocupados_rack1 = len(df_rack1[df_rack1["id_pallet_asignado"] != "Libre"])
-    ocupados_rack2 = len(df_rack2[df_rack2["id_pallet_asignado"] != "Libre"])
+    ocupados_rack1 = len(df_rack1[df_rack1["NPallet"] != "Libre"])
+    ocupados_rack2 = len(df_rack2[df_rack2["NPallet"] != "Libre"])
     disponibles_rack1 = total_rack1 - ocupados_rack1
     disponibles_rack2 = total_rack2 - ocupados_rack2
     utilizacion_rack1 = f"{(ocupados_rack1 / total_rack1 * 100):.2f}%" if total_rack1 > 0 else "0.00%"
@@ -462,14 +465,14 @@ def actualizar_vista_realtime(n_intervals):
     matriz_rack1 = pd.crosstab(
         index=[df_rack1["Piso"], df_rack1["Posición Pallet"]],
         columns=df_rack1["Letra"],
-        values=df_rack1["id_pallet_asignado"],
+        values=df_rack1["NPallet"],
         aggfunc="first"
     ).fillna("Libre").sort_index(ascending=[False, False])
 
     matriz_rack2 = pd.crosstab(
         index=[df_rack2["Piso"], df_rack2["Posición Pallet"]],
         columns=df_rack2["Letra"],
-        values=df_rack2["id_pallet_asignado"],
+        values=df_rack2["NPallet"],
         aggfunc="first"
     ).fillna("Libre").sort_index(ascending=[False, False])
 
@@ -522,7 +525,7 @@ def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha
         "Tipo Almacén", "Piso", "Rack", "Letra", "Posición Pallet", "Estado Ubicación",
         "id_pallet_asignado", "Descripción", "Variedad", "Mercado", "Fecha Faena", "NPallet"
     ])
-    df_posiciones["id_pallet_asignado"] = df_posiciones["id_pallet_asignado"].fillna("Libre")
+    df_posiciones["NPallet"] = df_posiciones["NPallet"].fillna("Libre")
 
     # Filtrar datos por racks
     df_rack1 = df_posiciones[df_posiciones["Rack"] == 1]
@@ -531,15 +534,15 @@ def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha
     # Calcular utilización y espacios disponibles por rack
     total_rack1 = len(df_rack1)
     total_rack2 = len(df_rack2)
-    ocupados_rack1 = len(df_rack1[df_rack1["id_pallet_asignado"] != "Libre"])
-    ocupados_rack2 = len(df_rack2[df_rack2["id_pallet_asignado"] != "Libre"])
+    ocupados_rack1 = len(df_rack1[df_rack1["NPallet"] != "Libre"])
+    ocupados_rack2 = len(df_rack2[df_rack2["NPallet"] != "Libre"])
     disponibles_rack1 = total_rack1 - ocupados_rack1
     disponibles_rack2 = total_rack2 - ocupados_rack2
     utilizacion_rack1 = f"{(ocupados_rack1 / total_rack1 * 100):.2f}%" if total_rack1 > 0 else "0.00%"
     utilizacion_rack2 = f"{(ocupados_rack2 / total_rack2 * 100):.2f}%" if total_rack2 > 0 else "0.00%"
 
     # Calcular métricas generales
-    total_general = total_rack1 + total_rack2  # Se define total_general aquí
+    total_general = total_rack1 + total_rack2
     ocupados_general = ocupados_rack1 + ocupados_rack2
     disponibles_general = total_general - ocupados_general
     utilizacion_general = f"{(ocupados_general / total_general * 100):.2f}%" if total_general > 0 else "0.00%"
@@ -548,22 +551,22 @@ def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha
     matriz_rack1 = pd.crosstab(
         index=[df_rack1["Piso"], df_rack1["Posición Pallet"]],
         columns=df_rack1["Letra"],
-        values=df_rack1["id_pallet_asignado"],
+        values=df_rack1["NPallet"],
         aggfunc="first"
     ).fillna("Libre").sort_index(ascending=[False, False])
 
     matriz_rack2 = pd.crosstab(
         index=[df_rack2["Piso"], df_rack2["Posición Pallet"]],
         columns=df_rack2["Letra"],
-        values=df_rack2["id_pallet_asignado"],
+        values=df_rack2["NPallet"],
         aggfunc="first"
     ).fillna("Libre").sort_index(ascending=[False, False])
 
     # Crear opciones para los dropdowns dinámicos
-    id_pallet_options = [{"label": val, "value": val} for val in df_posiciones["id_pallet_asignado"].unique() if val != "Libre"]
-    variedad_options = [{"label": val, "value": val} for val in df_posiciones["Variedad"].dropna().unique() if val != "Libre"]
-    mercado_options = [{"label": val, "value": val} for val in df_posiciones["Mercado"].dropna().unique() if val != "Libre"]
-    fecha_faena_options = [{"label": str(val), "value": str(val)} for val in df_posiciones["Fecha Faena"].dropna().unique() if val != "Libre"]
+    id_pallet_options = [{"label": val, "value": val} for val in df_posiciones["NPallet"].unique() if val != "Libre"]
+    variedad_options = [{"label": val, "value": val} for val in df_posiciones["Variedad"].dropna().unique()]
+    mercado_options = [{"label": val, "value": val} for val in df_posiciones["Mercado"].dropna().unique()]
+    fecha_faena_options = [{"label": str(val), "value": str(val)} for val in df_posiciones["Fecha Faena"].dropna().unique()]
 
     # Generar HTML de tablas con colores dinámicos
     def generar_html_matriz(df, titulo):
@@ -583,9 +586,9 @@ def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha
                 if val == "Libre":
                     estilo["backgroundColor"] = "green"
                 else:
-                    variedad = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Variedad"].values[0]
-                    mercado = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Mercado"].values[0]
-                    fecha_faena = df_posiciones.loc[df_posiciones["id_pallet_asignado"] == val, "Fecha Faena"].values[0]
+                    variedad = df_posiciones.loc[df_posiciones["NPallet"] == val, "Variedad"].values[0]
+                    mercado = df_posiciones.loc[df_posiciones["NPallet"] == val, "Mercado"].values[0]
+                    fecha_faena = df_posiciones.loc[df_posiciones["NPallet"] == val, "Fecha Faena"].values[0]
 
                     if (
                         (filtro_ids and val in filtro_ids) or
@@ -624,6 +627,7 @@ def actualizar_colores(filtro_ids, filtro_variedad, filtro_mercado, filtro_fecha
     )
 
 
+
 # --- Callbacks ---
 @app.callback(
     Output("page-content", "children"),
@@ -643,8 +647,6 @@ def display_page(pathname):
     return login_layout()
 
 
-
-
 @app.callback(
     [
         Output("assign-feedback", "children"),
@@ -652,41 +654,35 @@ def display_page(pathname):
         Output("piso-select", "options"),
         Output("rack-select", "options"),
         Output("letra-select", "options"),
+        Output("pallet-id", "value"),  # Limpiar el campo después del clic
     ],
     [
+        Input("tipo-almacen-select", "value"),
+        Input("piso-select", "value"),
+        Input("rack-select", "value"),
         Input("assign-button", "n_clicks"),
-        State("tipo-almacen-select", "value"),
-        State("piso-select", "value"),
-        State("rack-select", "value"),
+    ],
+    [
         State("letra-select", "value"),
-        State("pallet-id", "value"),
+        State("pallet-id", "value"),  # Aquí se ingresará el string completo
     ],
 )
-def asignar_y_refrescar(n_clicks, tipo_almacen, piso, rack, letra, pallet_id):
-    # Obtener las opciones disponibles
+def asignar_y_refrescar(tipo_almacen, piso, rack, n_clicks, letra, pallet_data):
+    # Obtener las opciones disponibles basadas en los filtros seleccionados
     tipos_almacen, pisos, racks, letras = obtener_opciones_disponibles(
         tipo_almacen=tipo_almacen, piso=piso, rack=rack, letra=letra
     )
+
+    # Convertir resultados a formato para dropdowns
     tipos_almacen_options = [{"label": t, "value": t} for t in tipos_almacen]
     pisos_options = [{"label": p, "value": p} for p in pisos]
     racks_options = [{"label": r, "value": r} for r in racks]
     letras_options = [{"label": l, "value": l} for l in letras]
 
-    # Verificar si no hay posiciones disponibles
-    if not tipos_almacen and not pisos and not racks and not letras:
-        return (
-            dbc.Alert(
-                "No hay posiciones disponibles, cambie de ubicacion", color="warning"
-            ),
-            tipos_almacen_options,
-            pisos_options,
-            racks_options,
-            letras_options,
-        )
-
+    # Verificar si el botón de asignar fue presionado
     if n_clicks:
-        # Validar campos vacíos
-        if not all([tipo_almacen, piso, rack, letra, pallet_id]):
+        # Validar que todos los campos requeridos estén llenos
+        if not all([tipo_almacen, piso, rack, letra, pallet_data]):
             return (
                 dbc.Alert(
                     "Por favor, complete todos los campos antes de asignar.",
@@ -696,46 +692,149 @@ def asignar_y_refrescar(n_clicks, tipo_almacen, piso, rack, letra, pallet_id):
                 pisos_options,
                 racks_options,
                 letras_options,
+                pallet_data,  # No limpiar el campo si hay error
             )
 
-        # Intentar asignar el pallet
-        mensaje = asignar_ubicacion(pallet_id, tipo_almacen, piso, rack, letra)
-
-        # Retornar mensaje con éxito o error
-        if "Error" in mensaje:
+        # Extraer el NPallet del string ingresado
+        try:
+            n_pallet = pallet_data.split(",")[-1].strip()  # Extraer el último campo (NPallet)
+            if len(n_pallet) != 8 or not n_pallet.isdigit():
+                raise ValueError("El NPallet extraído no es válido.")
+        except Exception as e:
             return (
-                dbc.Alert(mensaje, color="danger"),
+                dbc.Alert(
+                    f"Error al procesar el dato ingresado: {str(e)}. Asegúrese de usar el formato correcto.",
+                    color="danger",
+                ),
                 tipos_almacen_options,
                 pisos_options,
                 racks_options,
                 letras_options,
+                pallet_data,  # No limpiar el campo si hay error
             )
 
-        return (
-            dbc.Alert(mensaje, color="success"),
-            tipos_almacen_options,
-            pisos_options,
-            racks_options,
-            letras_options,
-        )
+        # Convertir el NPallet al id_pallet
+        conn = conectar_bd()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id_pallet FROM pallets WHERE NPallet = ?", (n_pallet,))
+            result = cursor.fetchone()
+            if result is None:
+                return (
+                    dbc.Alert(f"El NPallet '{n_pallet}' no existe en la base de datos.", color="danger"),
+                    tipos_almacen_options,
+                    pisos_options,
+                    racks_options,
+                    letras_options,
+                    pallet_data,  # No limpiar el campo si hay error
+                )
+            id_pallet = result[0]  # Obtener el id_pallet correspondiente
+        except pyodbc.Error as e:
+            return (
+                dbc.Alert(f"Error al buscar el NPallet: {e}", color="danger"),
+                tipos_almacen_options,
+                pisos_options,
+                racks_options,
+                letras_options,
+                pallet_data,  # No limpiar el campo si hay error
+            )
+        finally:
+            conn.close()
 
-    # Si no hay interacción, solo devuelve las opciones actualizadas
-    return "", tipos_almacen_options, pisos_options, racks_options, letras_options
+        # Intentar asignar el pallet usando id_pallet
+        mensaje = asignar_ubicacion(id_pallet, tipo_almacen, piso, rack, letra)
+
+        # Retornar mensaje de éxito o error
+        color = "success" if "Error" not in mensaje else "danger"
+        if color == "success":
+            mensaje = f"Pallet con NPallet {n_pallet} asignado a la ubicación {tipo_almacen}, {piso}, {rack}, {letra}."
+            return (
+                dbc.Alert(mensaje, color=color),
+                tipos_almacen_options,
+                pisos_options,
+                racks_options,
+                letras_options,
+                "",  # Limpiar el campo si se asignó correctamente
+            )
+        else:
+            return (
+                dbc.Alert(mensaje, color=color),
+                tipos_almacen_options,
+                pisos_options,
+                racks_options,
+                letras_options,
+                pallet_data,  # No limpiar el campo si hay error
+            )
+
+    # Si no se presionó el botón, solo actualiza las opciones dinámicas
+    return "", tipos_almacen_options, pisos_options, racks_options, letras_options, pallet_data
+
+
+
 
 @app.callback(
     Output("liberar-feedback", "children"),
     Input("liberar-button", "n_clicks"),
     State("pallet-id-liberar", "value")
 )
-def handle_liberar_pallet(n_clicks, pallet_id):
-    """Libera la ubicación del pallet especificado."""
+def handle_liberar_pallet(n_clicks, pallet_data):
+    """Libera la ubicación del pallet especificado utilizando NPallet."""
     if n_clicks:
-        if not pallet_id:
-            return dbc.Alert("Ingrese el ID del pallet.", color="danger")
-        mensaje = liberar_ubicacion(pallet_id)
-        color = "success" if "Éxito" in mensaje else "danger"
+        if not pallet_data:
+            return dbc.Alert("Ingrese los datos del pallet.", color="danger")
+
+        # Extraer el NPallet del string ingresado
+        try:
+            n_pallet = pallet_data.split(",")[-1].strip()  # Extraer el último campo (NPallet)
+            if len(n_pallet) != 8 or not n_pallet.isdigit():
+                raise ValueError("El NPallet extraído no es válido.")
+        except Exception as e:
+            return dbc.Alert(
+                f"Error al procesar los datos ingresados: {str(e)}. Asegúrese de usar el formato correcto.",
+                color="danger"
+            )
+
+        # Convertir el NPallet al id_pallet
+        conn = conectar_bd()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id_pallet FROM pallets WHERE NPallet = ?", (n_pallet,))
+            result = cursor.fetchone()
+            if result is None:
+                return dbc.Alert(f"El NPallet '{n_pallet}' no existe en la base de datos.", color="danger")
+            id_pallet = result[0]  # Obtener el id_pallet correspondiente
+        except pyodbc.Error as e:
+            return dbc.Alert(f"Error al buscar el NPallet: {e}", color="danger")
+        finally:
+            conn.close()
+
+        # Liberar la ubicación utilizando el id_pallet
+        mensaje = liberar_ubicacion(id_pallet)
+
+        # Ajustar el mensaje final
+        if "Ubicación liberada y reorganizada" in mensaje:
+            mensaje = f"Pallet ({n_pallet}) liberado y ubicación reorganizada exitosamente."
+            color = "success"
+        elif "posición 1" in mensaje:
+            mensaje = f"Error: Solo se puede liberar el Pallet con NPallet {n_pallet} desde la posición 1."
+            color = "danger"
+        elif "no está asignado a ninguna ubicación" in mensaje:
+            mensaje = f"Error: El Pallet con NPallet {n_pallet} no está asignado a ninguna ubicación."
+            color = "danger"
+        else:
+            mensaje = f"Error al liberar la ubicación para el Pallet con NPallet {n_pallet}: {mensaje}"
+            color = "danger"
+
         return dbc.Alert(mensaje, color=color)
+
     return ""
+
+
+
+
+
+
+
 
 @app.callback(
     Output("create-user-modal", "is_open"),
